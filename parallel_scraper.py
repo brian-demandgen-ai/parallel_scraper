@@ -180,6 +180,7 @@ class Crawler:
         params:
             max_urls (int): number of max urls to crawl, default is 30.
         """
+        self.internal_urls.add(self.root_url)
         url_queue = [self.root_url]
         depth_queue = [0]
         current_depth = 0
@@ -192,6 +193,8 @@ class Crawler:
 
             # print(self.total_urls_visited)
             i_urls, e_urls, nv_urls = self.get_all_website_links(url)
+
+            # sorted(i_urls)
 
             for u in i_urls:
                 u = u.lower()
