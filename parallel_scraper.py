@@ -100,6 +100,9 @@ class Crawler:
         sRawHtml = ""  # string to save the RAW HTML
 
         # make HTTP request & retrieve response
+        if self.debug:
+            print("attempting to GET from url: " + url)
+
         try:
             response = session.get(url)
             if self.debug: print("Retrieved response from: " + url)
@@ -136,8 +139,24 @@ class Crawler:
             sFirst1000Bytes = sFirst1000Bytes.lower()
             if "<html" not in sFirst1000Bytes:
                 if self.debug:
-                    print("No html tag found.  Throwing response away...")
-
+                    print("No html tag found, looking for redirect via meta tag...")
+                if "<meta" not in sFirst1000Bytes:
+                    if self.debug:
+                        print("No meta tag found.  Throwing response away...")
+                else:
+                    # attempt to find url
+                    content = response.html.xpath('//meta[@http-equiv="refresh"]/@content')
+                    if self.debug:
+                        print(content)
+                    if "url=" not in content[0]:
+                        if self.debug:
+                            print("meta tag does not express redirect.  Throwing response away...")
+                    else:
+                        # extract url string
+                        url = content[0].split("url=", 1)[1]
+                        if self.debug:
+                            print("extracted url from meta redirect: " + url)
+                        i_urls, e_urls, nv_urls = self.get_all_website_links(url)
             else:
                 soup = BeautifulSoup(sRawHtml, "html.parser")
                 # if self.debug: print("Saving raw HTML to file...")
@@ -167,7 +186,7 @@ class Crawler:
                     i_urls.add(href)
             return i_urls, e_urls, nv_urls
         except Exception as e:
-            if self.debug == True:
+            if self.debug:
                 print("Unhandled exception:")
                 print(e)
             self.oErrors.append(str(e))
