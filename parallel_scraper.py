@@ -83,6 +83,64 @@ class Crawler:
                 print("There was an exception writing to file " + "./error_output/ " + self.domain)
                 print(e)
 
+    def resolve_response_text(self, response):
+        """
+        Check response text and make sure we have data to process, OR see if there is a redirect META tag
+        returns:
+        GOOD_TO_GO - if page appears to have valid data, or
+        PAGE_IS_INVALID - if page does NOT appear to have valid data, or
+        <url> - url string that represents a redirect and needs to be retrieved
+        """
+        sFirst1000Bytes = ""  # a string to hold the 1st thousand bytes of HTML returned within which we will search for <head
+        sRawHtml = ""  # string to save the RAW HTML
+        metaContents = ""  # string to extract meta element contents
+
+        sRawHtml = response.html.html
+        sFirst1000Bytes = sRawHtml[0:1000]
+        sFirst1000Bytes = sFirst1000Bytes.lower()
+        if "<html" not in sFirst1000Bytes:
+            if self.debug:
+                print("No html tag found, looking for redirect via meta tag...")
+            if "<meta" not in sFirst1000Bytes:
+                if self.debug:
+                    print("No meta tag found.  Throwing response away...")
+                return "PAGE_IS_INVALID"
+            else:
+                # attempt to find url
+                content = response.html.xpath('//meta[@http-equiv="refresh"]/@content')
+                '''
+                if self.debug:
+                    print(content)
+                '''
+                if content:
+                    metaContents = content[0].lower()
+                    if "url=" in metaContents:
+                        # extract url string
+                        url = metaContents.split("url=", 1)[1]
+                        if self.debug:
+                            print("extracted url from meta redirect: " + url)
+                        return url
+
+                if self.debug:
+                    print("meta tag does not express redirect.  Throwing response away...")
+                return "PAGE_IS_INVALID"
+        else:
+            # see if we ALSO find a redirect META element (likely inside HEAD element)
+            content = response.html.xpath('//meta[@http-equiv="refresh"]/@content')
+
+            if content:
+                metaContents = content[0].lower()
+                print(metaContents)
+                if "url=" in metaContents:
+                    # extract url string
+                    url = metaContents.split("url=", 1)[1]
+                    if self.debug:
+                        print("extracted url from meta redirect: " + url)
+                    return url
+
+            # assume lack of meta direct means we can continue
+            return "GOOD_TO_GO"
+
     def get_all_website_links(self, url):
         """
         Returns all URLs that is found on `url` in which it belongs to the same website
@@ -91,7 +149,6 @@ class Crawler:
         i_urls = set()
         e_urls = set()
         nv_urls = []
-        sFirst1000Bytes = ""  # a string to hold the 1st thousand bytes of HTML returned within which we will search for <head
         h = html2text.HTML2Text()
         h.ignore_links = True
         h.ignore_images = True
@@ -105,7 +162,8 @@ class Crawler:
 
         try:
             response = session.get(url)
-            if self.debug: print("Retrieved response from: " + url)
+            if self.debug:
+                print("Retrieved response from: " + url)
 
         except Exception as e:
             if self.debug:
@@ -114,11 +172,13 @@ class Crawler:
                 print("attempting through proxy")
             try:
                 response = session.get(url, proxies=self.proxies, verify=False)
-                if self.debug: print("Retrieved response (through proxy) from: " + url)
+                if self.debug:
+                    print("Retrieved response (through proxy) from: " + url)
             except Exception as e:
                 session.close()
                 self.oErrors.append(str(e))
-                if self.debug: print("Added error to domain list to save...")
+                if self.debug:
+                    print("Added error to domain list to save...")
                 return i_urls, e_urls, nv_urls
 
         '''
@@ -134,30 +194,10 @@ class Crawler:
 
         try:
             # check for <head element
-            sRawHtml = response.html.html
-            sFirst1000Bytes = sRawHtml[0:1000]
-            sFirst1000Bytes = sFirst1000Bytes.lower()
-            if "<html" not in sFirst1000Bytes:
-                if self.debug:
-                    print("No html tag found, looking for redirect via meta tag...")
-                if "<meta" not in sFirst1000Bytes:
-                    if self.debug:
-                        print("No meta tag found.  Throwing response away...")
-                else:
-                    # attempt to find url
-                    content = response.html.xpath('//meta[@http-equiv="refresh"]/@content')
-                    if self.debug:
-                        print(content)
-                    if "url=" not in content[0]:
-                        if self.debug:
-                            print("meta tag does not express redirect.  Throwing response away...")
-                    else:
-                        # extract url string
-                        url = content[0].split("url=", 1)[1]
-                        if self.debug:
-                            print("extracted url from meta redirect: " + url)
-                        i_urls, e_urls, nv_urls = self.get_all_website_links(url)
-            else:
+            responseResult = self.resolve_response_text(response)
+
+            if responseResult == "GOOD_TO_GO":
+                sRawHtml = response.html.html
                 soup = BeautifulSoup(sRawHtml, "html.parser")
                 # if self.debug: print("Saving raw HTML to file...")
                 # self.save_html(response.html.html, url, sDomain)
@@ -184,6 +224,11 @@ class Crawler:
                         continue
                     # print(f"{GREEN}[*] Internal link: {href}{RESET}")
                     i_urls.add(href)
+            else:
+                if responseResult != "PAGE_IS_INVALID":
+                    # at this point we assume response is new URL to try
+                    i_urls, e_urls, nv_urls = self.get_all_website_links(responseResult)
+
             return i_urls, e_urls, nv_urls
         except Exception as e:
             if self.debug:
