@@ -130,7 +130,6 @@ class Crawler:
 
             if content:
                 metaContents = content[0].lower()
-                print(metaContents)
                 if "url=" in metaContents:
                     # extract url string
                     url = metaContents.split("url=", 1)[1]
