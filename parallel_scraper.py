@@ -1,5 +1,5 @@
 from requests_html import HTMLSession
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, urlunparse
 from bs4 import BeautifulSoup
 import html2text
 import multiprocessing
@@ -7,7 +7,7 @@ import os
 import time
 import sys
 import multiprocessing as mp
-
+import tldextract
 
 class Crawler:
     # initialize the set of links (unique links)
@@ -37,15 +37,17 @@ class Crawler:
         self.domain = self.get_domain(root_url)
 
     def get_domain(self, url):
-        '''
         url_extract = tldextract.extract(url)
         domain = url_extract.domain
+        suffix = url_extract.suffix
+        '''
         if not any(e in url_extract.suffix for e in self.US_URL_EXTENSIONS):
             domain = url_extract.suffix
         return domain
         '''
-        domain = urlparse(url).netloc
-        return domain
+        # domain = urlparse(url).netloc
+
+        return domain + "." + suffix
 
     def save_striped_content(self):
         # sStrippedDomain = urlparse(sFileName).netloc
@@ -96,9 +98,10 @@ class Crawler:
         metaContents = ""  # string to extract meta element contents
 
         sRawHtml = response.html.html
+        # print(sRawHtml)
         sFirst1000Bytes = sRawHtml[0:1000]
         sFirst1000Bytes = sFirst1000Bytes.lower()
-        if "<html" not in sFirst1000Bytes:
+        if ("<html" not in sFirst1000Bytes) and ("<!doctype html" not in sFirst1000Bytes):
             if self.debug:
                 print("No html tag found, looking for redirect via meta tag...")
             if "<meta" not in sFirst1000Bytes:
@@ -126,7 +129,13 @@ class Crawler:
                 return "PAGE_IS_INVALID"
         else:
             # see if we ALSO find a redirect META element (likely inside HEAD element)
+            # TODO - NEED BETTER WAY TO DO CASE-INSENSITIVE TAG SEARCH
             content = response.html.xpath('//meta[@http-equiv="refresh"]/@content')
+            # print(content)
+            if not content:
+                # <META HTTP-EQUIV="Refresh" CONTENT="0;URL=http://parkeddomain.earthlink.biz/">
+                content = response.html.xpath('//META[@HTTP-EQUIV="Refresh"]/@CONTENT')
+                # print(content)
 
             if content:
                 metaContents = content[0].lower()
@@ -135,6 +144,7 @@ class Crawler:
                     url = metaContents.split("url=", 1)[1]
                     if self.debug:
                         print("extracted url from meta redirect: " + url)
+                    # TODO - NEED TO HANDLE RELATIVE REDIRECT PATHS
                     return url
 
             # assume lack of meta direct means we can continue
@@ -152,6 +162,7 @@ class Crawler:
         h.ignore_links = True
         h.ignore_images = True
         domain_name = self.get_domain(url)  # domain name of the URL without the protocol
+        # print("domain name: " + domain_name)
         session = HTMLSession()  # initialize an HTTP session
         sRawHtml = ""  # string to save the RAW HTML
 
@@ -208,24 +219,38 @@ class Crawler:
                         # href empty tag
                         continue
                     # join the URL if it's relative (not absolute link)
+                    # print("url = " + url + ", href = " + href)
                     href = urljoin(url, href)
+                    # print("joined = " + href)
                     parsed_href = urlparse(href)
+                    # print(parsed_href)
+                    parsed_comps = list(parsed_href)
                     # remove URL GET parameters, URL fragments, etc.
-                    href = parsed_href.scheme + "://" + parsed_href.netloc + parsed_href.path
+                    # href = parsed_href.scheme + "://" + parsed_href.netloc + parsed_href.path
+                    # TODO - REMOVE EXTRANEOUS FORWARD SLASHES
+                    parsed_comps[3] = ''
+                    parsed_comps[4] = ''
+                    parsed_comps[5] = ''
+                    href = urlunparse(parsed_comps)
                     parsed = urlparse(href)
+                    # print(href)
                     if not bool(parsed.netloc) and bool(parsed.scheme):
+                        # print("not valid url: " + href)
                         nv_urls.append(href)
                         # not a valid URL
                         continue
                     if domain_name not in href:
+                        # print("external url: " + href)
                         # external link
                         e_urls.add(href)
                         continue
+                    # print("internal url: " + href)
                     # print(f"{GREEN}[*] Internal link: {href}{RESET}")
                     i_urls.add(href)
             else:
                 if responseResult != "PAGE_IS_INVALID":
                     # at this point we assume response is new URL to try
+                    # TODO - ADD CHECK TO AVOID REDIRECTION TO SAME PAGE
                     i_urls, e_urls, nv_urls = self.get_all_website_links(responseResult)
 
             return i_urls, e_urls, nv_urls
@@ -264,7 +289,7 @@ class Crawler:
                 if u not in self.internal_urls:
                     if (".pdf" not in u) and (".jpg" not in u) and (".png" not in u) and (".wav" not in u) and (
                             ".mp4" not in u) and (".wmv" not in u) and (".zip" not in u) and (".tar" not in u) and (
-                            ".tgz" not in u) and (".mp3" not in u) and ("mailto" not in u):
+                            ".tgz" not in u) and (".mp3" not in u) and ("mailto" not in u) and ("jpeg" not in u):
                         # if self.debug: print("Internal: ", u)
                         self.internal_urls.add(u)
                         url_queue.insert(0, u)
