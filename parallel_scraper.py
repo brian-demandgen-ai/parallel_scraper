@@ -110,6 +110,7 @@ class Crawler:
                 return "PAGE_IS_INVALID"
             else:
                 # attempt to find url
+                # TODO - NEED BETTER WAY TO DO CASE-INSENSITIVE TAG SEARCH
                 content = response.html.xpath('//meta[@http-equiv="refresh"]/@content')
                 '''
                 if self.debug:
@@ -122,6 +123,12 @@ class Crawler:
                         url = metaContents.split("url=", 1)[1]
                         if self.debug:
                             print("extracted url from meta redirect: " + url)
+                        # TODO - NEED TO HANDLE RELATIVE REDIRECT PATHS
+                        url_comps = list(urlparse(url))
+                        if url_comps[0] == "" or not url_comps[0]:
+                            url = urljoin(response.url, url)
+                            if self.debug:
+                                print("joined relative redirect as: " + url)
                         return url
 
                 if self.debug:
@@ -145,6 +152,11 @@ class Crawler:
                     if self.debug:
                         print("extracted url from meta redirect: " + url)
                     # TODO - NEED TO HANDLE RELATIVE REDIRECT PATHS
+                    url_comps = list(urlparse(url))
+                    if url_comps[0] == "" or not url_comps[0]:
+                        url = urljoin(response.url, url)
+                        if self.debug:
+                            print("joined relative redirect as: " + url)
                     return url
 
             # assume lack of meta direct means we can continue
@@ -208,12 +220,13 @@ class Crawler:
 
             if responseResult == "GOOD_TO_GO":
                 sRawHtml = response.html.html
+                # print(sRawHtml)
                 soup = BeautifulSoup(sRawHtml, "html.parser")
                 # if self.debug: print("Saving raw HTML to file...")
                 # self.save_html(response.html.html, url, sDomain)
                 self.corpus = self.corpus + list(soup.stripped_strings)
 
-                for a_tag in soup.findAll("a"):
+                for a_tag in soup.findAll(["a", "area"]):
                     href = a_tag.attrs.get("href")
                     if href == "" or href is None:
                         # href empty tag
@@ -232,6 +245,7 @@ class Crawler:
                     parsed_comps[4] = ''
                     parsed_comps[5] = ''
                     href = urlunparse(parsed_comps)
+                    # print("HREF = " + href)
                     parsed = urlparse(href)
                     # print(href)
                     if not bool(parsed.netloc) and bool(parsed.scheme):
@@ -246,6 +260,7 @@ class Crawler:
                         continue
                     # print("internal url: " + href)
                     # print(f"{GREEN}[*] Internal link: {href}{RESET}")
+                    # TODO - DON'T ADD IF URL IS SAME AS ROOT WITH ONLY SCHEME BEING DIFFERENT
                     i_urls.add(href)
             else:
                 if responseResult != "PAGE_IS_INVALID":
@@ -261,7 +276,7 @@ class Crawler:
             self.oErrors.append(str(e))
             return i_urls, e_urls, nv_urls
 
-    def crawl(self, max_depth=20, max_url=20):
+    def crawl(self, max_depth=20, max_url=100):
         """
         Crawls a web page and extracts all links.
         You'll find all links in `external_urls` and `internal_urls` global set variables.
