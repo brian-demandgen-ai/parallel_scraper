@@ -24,6 +24,7 @@ class Crawler:
     total_urls_visited = 0
     root_url = ""
     domain = ""
+    total_url_retries = 0
 
     proxy_host = "proxy.crawlera.com"
     proxy_port_http = "8010"
@@ -58,7 +59,7 @@ class Crawler:
 
         # write the striped text to a file and overwrite it
         try:
-            file = open("./striped_output/" + self.domain, "a", encoding='utf-8')
+            file = open("./striped_output/" + self.domain + ".txt", "a", encoding='utf-8')
             content = '\n'.join(self.corpus)
             file.write(content + '\n')
             file.close()
@@ -76,7 +77,7 @@ class Crawler:
 
         # write the HTML to a file and overwrite it
         try:
-            file = open("./error_output/" + self.domain, "a", encoding='utf-8')
+            file = open("./error_output/" + self.domain + ".txt", "a", encoding='utf-8')
             content = '\n'.join(self.oErrors)
             file.write(content + '\n')
             file.close()
@@ -91,6 +92,7 @@ class Crawler:
         returns:
         GOOD_TO_GO - if page appears to have valid data, or
         PAGE_IS_INVALID - if page does NOT appear to have valid data, or
+        RETRY_PAGE_GET - if results indicate a transient error (i.e. connection reset), or
         <url> - url string that represents a redirect and needs to be retrieved
         """
         sFirst1000Bytes = ""  # a string to hold the 1st thousand bytes of HTML returned within which we will search for <head
@@ -106,7 +108,22 @@ class Crawler:
                 print("No html tag found, looking for redirect via meta tag...")
             if "<meta" not in sFirst1000Bytes:
                 if self.debug:
-                    print("No meta tag found.  Throwing response away...")
+                    print("No meta tag found, looking for retry type responses...")
+
+                # let's consider an empty response possibly caused by transient error and force a retry
+                if not (sFirst1000Bytes and not sFirst1000Bytes.isspace()):
+                    if self.debug:
+                        print("response is empty, retrying: " + response.url)
+                    return "RETRY_PAGE_GET"
+
+                # now look for response text that might indicate a transient issue that is worth a retry
+                if "connection reset" in sFirst1000Bytes:
+                    if self.debug:
+                        print("got connection reset for url, retrying: " + response.url)
+                    return "RETRY_PAGE_GET"
+
+                if self.debug:
+                    print("No retry type responses found, throwing response away!")
                 return "PAGE_IS_INVALID"
             else:
                 # attempt to find url
@@ -123,7 +140,8 @@ class Crawler:
                         url = metaContents.split("url=", 1)[1]
                         if self.debug:
                             print("extracted url from meta redirect: " + url)
-                        # TODO - NEED TO HANDLE RELATIVE REDIRECT PATHS
+
+                        # handle relative redirect paths
                         url_comps = list(urlparse(url))
                         if url_comps[0] == "" or not url_comps[0]:
                             url = urljoin(response.url, url)
@@ -132,7 +150,7 @@ class Crawler:
                         return url
 
                 if self.debug:
-                    print("meta tag does not express redirect.  Throwing response away...")
+                    print("meta tag does not express redirect.  Throwing response away!")
                 return "PAGE_IS_INVALID"
         else:
             # see if we ALSO find a redirect META element (likely inside HEAD element)
@@ -151,7 +169,8 @@ class Crawler:
                     url = metaContents.split("url=", 1)[1]
                     if self.debug:
                         print("extracted url from meta redirect: " + url)
-                    # TODO - NEED TO HANDLE RELATIVE REDIRECT PATHS
+
+                    # handle relative redirect paths
                     url_comps = list(urlparse(url))
                     if url_comps[0] == "" or not url_comps[0]:
                         url = urljoin(response.url, url)
@@ -159,7 +178,7 @@ class Crawler:
                             print("joined relative redirect as: " + url)
                     return url
 
-            # assume lack of meta direct means we can continue
+            # assume lack of meta re-direct means we can continue
             return "GOOD_TO_GO"
 
     def get_all_website_links(self, url):
@@ -263,6 +282,15 @@ class Crawler:
                     # TODO - DON'T ADD IF URL IS SAME AS ROOT WITH ONLY SCHEME BEING DIFFERENT
                     i_urls.add(href)
             else:
+                if responseResult == "RETRY_PAGE_GET":
+                    if self.total_url_retries < 5:
+                        self.total_url_retries += 1
+                        time.sleep(5)
+                        i_urls, e_urls, nv_urls = self.get_all_website_links(url)
+                    else:
+                        if self.debug:
+                            print("too many retries for url: " + url)
+
                 if responseResult != "PAGE_IS_INVALID":
                     # at this point we assume response is new URL to try
                     # TODO - ADD CHECK TO AVOID REDIRECTION TO SAME PAGE
@@ -296,6 +324,7 @@ class Crawler:
 
             # print(self.total_urls_visited)
             i_urls, e_urls, nv_urls = self.get_all_website_links(url)
+            self.total_url_retries = 0
 
             # sorted(i_urls)
 
